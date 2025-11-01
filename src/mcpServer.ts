@@ -278,7 +278,27 @@ export async function createServer() {
       tools: [
         {
           name: "listCharacters",
-          description: "Return array of available Tekken 8 characters.",
+          description: `Return array of available Tekken 8 characters.
+
+🎯 WHEN TO USE:
+• Starting a conversation about Tekken 8
+• User asks "who can I play?" or "what characters are available?"
+• Recovering from a CHARACTER_NOT_FOUND error
+• Validating character names before other operations
+
+📋 RETURNS:
+Array of all playable Tekken 8 character names (lowercase, URL-friendly format)
+
+🔗 COMBINE WITH:
+• After listing, use getCharacterOverview() to learn about specific characters
+• Use compareCharacters() to help choose between options
+
+💡 EXAMPLES:
+Q: "What characters are in Tekken 8?"
+A: listCharacters() → shows all 33 characters
+
+Q: "Can I play Heihachi?"
+A: listCharacters() → check if "heihachi" is in list`,
           inputSchema: {
             type: "object",
             properties: {},
@@ -287,49 +307,218 @@ export async function createServer() {
         },
         {
           name: "getMove",
-          description: "Retrieve frame‑data for a specific move.",
+          description: `Retrieve detailed frame data for a specific move by exact command.
+
+🎯 WHEN TO USE:
+• Looking up a specific move the user mentioned (e.g., "what's Law's d/f+2?")
+• Getting exact frame data for a known move
+• Verifying move properties after seeing it in a match
+• Need precise data for one specific move
+
+⚠️ NOTE: Requires EXACT command notation. For finding moves by properties, use searchMoves() instead.
+
+📋 RETURNS:
+Complete frame data including startup, block advantage, hit advantage, counter-hit, damage, notes, and tags
+
+🔗 COMBINE WITH:
+• Use searchMoves() first if you don't know the exact command
+• Use getKeyMoves() to discover important move commands
+• Follow up with getTrainingDrills() to practice the move
+
+💡 EXAMPLES:
+Q: "What are the frames on Law's Dragon Hammer?"
+A: searchMoves("law", { hasTag: "launcher" }) → find command → getMove("law", "d+2,3")
+
+Q: "Is Jin's f+4 safe?"
+A: getMove("jin", "f+4") → check block advantage`,
           inputSchema: {
             type: "object",
             properties: {
-              character: { type: "string", description: "Character name" },
-              command: { type: "string", description: "Move command input" }
+              character: {
+                type: "string",
+                description: "Character name (e.g., 'law', 'jin', 'kazuya'). Case-insensitive."
+              },
+              command: {
+                type: "string",
+                description: "Exact move command notation (e.g., 'd/f+2', 'b+4', '1,2,3'). Must match exactly."
+              }
             },
             required: ["character", "command"]
           }
         },
         {
           name: "searchMoves",
-          description: "Search and filter moves by frame data properties. Great for finding safe moves, launchers, fast attacks, etc.",
+          description: `Search and filter moves by frame data properties. The most versatile tool for finding moves.
+
+🎯 WHEN TO USE:
+• Finding safe moves for neutral game: { minBlock: -9 }
+• Finding punishers: { maxStartup: 10 } for i10, { maxStartup: 12 } for i12
+• Finding launchers: { minCounterHit: 20 } or { hasTag: "chl" }
+• Finding fast pokes: { maxStartup: 12, minBlock: -9 }
+• Finding pressure tools: { minHit: 1, maxStartup: 13 } (plus frame pokes)
+• Finding specific move types: { hasTag: "he" } for heat engagers
+
+📋 COMMON PATTERNS:
+• Best neutral pokes: { hitLevel: "m", minBlock: -9, maxStartup: 13 }
+• Fast launchers: { minCounterHit: 20, maxStartup: 16 }
+• Plus frame moves: { minBlock: 0 }
+• Safe pressure: { minBlock: -9, minHit: 5 }
+• Heat engagers: { hasTag: "he" }
+• Low pokes: { hitLevel: "l", minBlock: -12 }
+
+🔗 COMBINE WITH:
+• After getCharacterOverview() to understand playstyle context
+• Before getTrainingDrills() to identify what to practice
+• With getKeyMoves() to see curated vs. filtered results
+
+⚠️ PRO TIPS:
+• -9 or better = safe (can't be punished by standing jabs)
+• i10-i12 = fast pokes/punishers
+• i13-i15 = launchers/big damage
+• minCounterHit: 20 = counter-hit launchers
+• Combine filters for precise results
+
+💡 EXAMPLES:
+Q: "What are Law's safe mids?"
+A: searchMoves("law", { hitLevel: "m", minBlock: -9 })
+
+Q: "Show me Jin's fastest punishers"
+A: searchMoves("jin", { maxStartup: 12, limit: 5 })
+
+Q: "What moves can Law use for pressure?"
+A: searchMoves("law", { minBlock: 0, maxStartup: 15 })`,
           inputSchema: {
             type: "object",
             properties: {
-              character: { type: "string", description: "Character name" },
+              character: {
+                type: "string",
+                description: "Character name (e.g., 'law', 'jin', 'kazuya')"
+              },
               hitLevel: {
                 type: "string",
                 enum: ["h", "m", "l", "s"],
-                description: "Hit level: h=high, m=mid, l=low, s=special"
+                description: `Hit level filter:
+• 'h' = high (can be ducked, common for jabs)
+• 'm' = mid (must be blocked, best for neutral)
+• 'l' = low (must be blocked crouching, for mixups)
+• 's' = special (throws, unblockables)
+
+💡 TIP: Mids are safest for neutral game as they can't be ducked`
               },
-              minDamage: { type: "number", description: "Minimum damage value" },
-              maxStartup: { type: "number", description: "Maximum startup frames (for fast moves)" },
-              minBlock: { type: "number", description: "Minimum block advantage (for safe moves, e.g. -10)" },
-              maxBlock: { type: "number", description: "Maximum block advantage (for unsafe moves)" },
-              minHit: { type: "number", description: "Minimum hit advantage (for plus frames)" },
-              minCounterHit: { type: "number", description: "Minimum counter hit advantage (for launchers)" },
-              hasTag: { type: "string", description: "Must have specific tag (he=heat engager, trn=tornado, etc.)" },
-              limit: { type: "number", description: "Limit number of results (default: all)" }
+              minDamage: {
+                type: "number",
+                description: "Minimum damage value (e.g., 20 for heavy hitters)"
+              },
+              maxStartup: {
+                type: "number",
+                description: `Maximum startup frames (lower = faster):
+• 10 = i10 punisher (jab speed)
+• 12 = i12 punisher (fast mids)
+• 13-15 = launchers
+• 16-20 = slower, riskier moves
+
+EXAMPLE: maxStartup: 10 finds all i10 moves`
+              },
+              minBlock: {
+                type: "number",
+                description: `Minimum block advantage (for safe moves):
+• -9 or better = Safe (standard threshold)
+• 0 or better = Plus on block (your turn)
+• +3 to +5 = Frame trap territory
+
+EXAMPLE: minBlock: -9 finds all safe moves`
+              },
+              maxBlock: {
+                type: "number",
+                description: "Maximum block advantage (for finding unsafe moves, e.g., -15 for launch punishable)"
+              },
+              minHit: {
+                type: "number",
+                description: `Minimum hit advantage (for advantage on hit):
+• 1+ = Plus on hit
+• 5+ = Significant advantage
+• 10+ = Combo opportunity
+• 15+ = Usually a launcher
+
+EXAMPLE: minHit: 5 finds moves with good hit advantage`
+              },
+              minCounterHit: {
+                type: "number",
+                description: `Minimum counter-hit advantage:
+• 20+ = Counter-hit launcher (most important)
+• 15+ = Combo starter
+• 10+ = Good advantage
+
+EXAMPLE: minCounterHit: 20 finds all CH launchers`
+              },
+              hasTag: {
+                type: "string",
+                description: `Filter by special properties:
+• "he" = Heat Engagers (activate heat mode)
+• "heat" = Heat moves (H. commands + heat tagged moves)
+• "chl" or "launcher" = Counter-hit launchers
+• "tornado" = Tornado (screw) moves for combos
+• "safe" = Safe moves (-9 or better on block)
+• "pc" = Power Crush
+• "charge" or "hold" = Charge/hold moves
+
+EXAMPLE: hasTag: "he" finds all heat engagers`
+              },
+              limit: {
+                type: "number",
+                description: "Limit number of results (useful for 'top 5' queries). Default: return all matching moves"
+              }
             },
             required: ["character"]
           }
         },
         {
           name: "getCharacterOverview",
-          description: "Get character overview including bio, strengths, weaknesses, and playstyle from Wavu Wiki",
+          description: `Get comprehensive character information including playstyle, strengths, weaknesses, and key techniques.
+
+🎯 WHEN TO USE:
+• Starting to learn a new character
+• User asks "how does X play?" or "is X good for beginners?"
+• Need to understand character archetype before suggesting moves
+• Comparing character philosophies and gameplans
+• First step in any "learn character" workflow
+
+📋 RETURNS:
+• Bio (name, nationality, fighting style)
+• Playstyle & archetype (rushdown, zoner, grappler, etc.)
+• Difficulty rating (beginner, intermediate, advanced)
+• Strengths (what the character excels at)
+• Weaknesses (what the character struggles with)
+• Key techniques (signature moves and strategies)
+
+🔗 COMBINE WITH:
+• Follow with getKeyMoves() to see specific important moves
+• Follow with searchMoves() to find moves matching their strengths
+• Follow with getTrainingDrills() for practice plan
+• Use before compareCharacters() to understand differences
+
+⚠️ DATA SOURCE: Wavu Wiki (community-maintained, may lag behind patches)
+
+💡 EXAMPLES:
+Q: "Tell me about Law"
+A: getCharacterOverview("law") → Learn he's rushdown with DSS stance
+
+Q: "Is Jin good for beginners?"
+A: getCharacterOverview("jin") → Check difficulty rating
+
+Q: "What are Paul's weaknesses?"
+A: getCharacterOverview("paul") → Read weaknesses section
+
+TYPICAL WORKFLOW:
+1. getCharacterOverview("law") ← Start here
+2. getKeyMoves("law") ← See important moves
+3. getTrainingDrills("law", "fundamentals") ← Practice plan`,
           inputSchema: {
             type: "object",
             properties: {
               character: {
                 type: "string",
-                description: "Character name"
+                description: "Character name (e.g., 'law', 'jin', 'kazuya'). Case-insensitive."
               }
             },
             required: ["character"]
@@ -337,13 +526,53 @@ export async function createServer() {
         },
         {
           name: "getKeyMoves",
-          description: "Get the most important moves for a character including their best launchers, pokes, and signature techniques",
+          description: `Get curated list of essential moves every player should know for a character.
+
+🎯 WHEN TO USE:
+• User asks "what moves should I learn first?"
+• After getCharacterOverview() to see concrete moves
+• Quick reference for character's most important tools
+• Building a "starter kit" for new character players
+• Want expert-curated moves instead of manual filtering
+
+📋 RETURNS:
+Categorized essential moves:
+• 🚀 Best Launchers (CH +20 or better)
+• 👊 Fast Pokes (i12 or faster, safe on block)
+• 🛡️ Safe Moves (-9 or better on block)
+• 🔥 Heat Engagers (activate heat mode)
+
+Each move includes command, name, frame data, and usage notes
+
+🔗 COMBINE WITH:
+• After getCharacterOverview() for context
+• Before getTrainingDrills() to know what to practice
+• Compare with searchMoves() for more options
+
+⚠️ VS searchMoves():
+• getKeyMoves() = Curated essentials (10-20 moves)
+• searchMoves() = Custom filtered results (any criteria)
+
+💡 EXAMPLES:
+Q: "What are Law's most important moves?"
+A: getKeyMoves("law") → See his top launchers, pokes, heat engagers
+
+Q: "I just picked up Jin, what should I learn?"
+A: getKeyMoves("jin") → Get starter movelist
+
+Q: "What are the must-know moves for Bryan?"
+A: getKeyMoves("bryan") → Essential toolkit
+
+TYPICAL WORKFLOW:
+1. getCharacterOverview("law") ← Understand playstyle
+2. getKeyMoves("law") ← See essential moves ← YOU ARE HERE
+3. getTrainingDrills("law", "fundamentals") ← Practice them`,
           inputSchema: {
             type: "object",
             properties: {
               character: {
                 type: "string",
-                description: "Character name to get key moves for"
+                description: "Character name to get key moves for (e.g., 'law', 'jin', 'kazuya')"
               }
             },
             required: ["character"]
@@ -351,21 +580,137 @@ export async function createServer() {
         },
         {
           name: "getTrainingDrills",
-          description: "Generate personalized training drills and practice routines for a character with specific focus areas",
+          description: `Generate structured training programs with specific drills and practice routines.
+
+🎯 WHEN TO USE:
+• User asks "how do I practice?" or "how do I get better at X?"
+• After showing character overview and key moves
+• User wants concrete practice plan
+• Need step-by-step training instructions
+• Building a learning roadmap
+
+📋 RETURNS:
+Complete training program with:
+• Estimated time commitment
+• Difficulty assessment
+• Multiple focused drills with:
+  - Objectives (what you'll learn)
+  - Setup instructions
+  - Step-by-step process
+  - Pro tips
+  - Duration & repetitions
+  - Specific moves to practice
+
+🎯 FOCUS AREAS:
+• "fundamentals" - Core gameplan, pokes, spacing (START HERE)
+• "combos" - Launcher combos, wall combos, optimization
+• "punishment" - Punisher drills, frame-perfect execution
+• "movement" - Backdash, Korean backdash, wavedash (if applicable)
+• "heat" - Heat activation, heat mode strategies
+• "pressure" - Frame traps, plus frames, offense
+• "defense" - Blocking, throw breaks, defensive options
+• "all" - Comprehensive program covering everything
+
+🔗 COMBINE WITH:
+• After getCharacterOverview() and getKeyMoves()
+• Use focus area matching character's playstyle
+• Revisit with different focus areas as you improve
+
+⚠️ PRO TIPS:
+• Start with "fundamentals" for new characters
+• Focus on one area at a time for faster improvement
+• "all" provides complete coverage but takes longer
+• Practice drills in order (beginner → advanced)
+
+💡 EXAMPLES:
+Q: "How do I practice Law?"
+A: getTrainingDrills("law", "fundamentals") → 30-min fundamental program
+
+Q: "I keep dropping combos with Jin"
+A: getTrainingDrills("jin", "combos") → Combo-specific drills
+
+Q: "How do I improve my punishment?"
+A: getTrainingDrills("kazuya", "punishment") → Punisher training
+
+Q: "Give me a complete Law training plan"
+A: getTrainingDrills("law", "all") → Full program
+
+TYPICAL WORKFLOW:
+1. getCharacterOverview("law") ← Understand character
+2. getKeyMoves("law") ← Know important moves
+3. getTrainingDrills("law", "fundamentals") ← Practice! ← YOU ARE HERE`,
           inputSchema: {
             type: "object",
             properties: {
               character: {
                 type: "string",
-                description: "Character name to generate training drills for"
+                description: "Character name to generate training drills for (e.g., 'law', 'jin', 'kazuya')"
               },
               focus: {
                 type: "string",
                 enum: ["fundamentals", "combos", "punishment", "movement", "heat", "pressure", "defense", "all"],
-                description: "Training focus area (optional, defaults to 'all')"
+                description: `Training focus area:
+• "fundamentals" = Pokes, spacing, gameplan (best for beginners)
+• "combos" = Launchers, wall combos, damage optimization
+• "punishment" = Frame-perfect punishers, whiff punishment
+• "movement" = Backdash, Korean backdash, wavedash
+• "heat" = Heat engagers, heat mode strategies
+• "pressure" = Frame traps, plus frames, offensive tools
+• "defense" = Blocking mixups, throw breaks, defensive awareness
+• "all" = Comprehensive program (longer time commitment)
+
+Default: "all" if not specified`
               }
             },
             required: ["character"]
+          }
+        },
+        {
+          name: "getCapabilities",
+          description: `Understand what this Tekken MCP server can do and discover optimal workflows.
+
+🎯 WHEN TO USE:
+• Starting a conversation (discover what's possible)
+• User asks "what can you help me with?"
+• Planning a complex multi-step task
+• Unsure which tool to use next
+• Want to understand data sources and limitations
+
+📋 RETURNS:
+Comprehensive server capabilities including:
+• Available data sources (TekkenDocs, Wavu Wiki)
+• Tool categories and their purposes
+• Common workflows with step-by-step guides
+• Best practices for agents and users
+• Known limitations and update frequencies
+• Future planned features
+
+🔗 USE THIS TO:
+• Plan optimal tool call sequences
+• Understand when to use which tool
+• Learn common usage patterns
+• Discover relationships between tools
+• Set user expectations correctly
+
+⚠️ BEST PRACTICE:
+Call this once at the start of complex tasks to understand the full toolkit
+
+💡 EXAMPLES:
+Q: "What can this server do?"
+A: getCapabilities() → Full capability overview
+
+Q: "How do I learn a new character?"
+A: getCapabilities() → See "Learn new character" workflow
+
+Q: "What's the best way to prepare for a matchup?"
+A: getCapabilities() → See "Prepare for matchup" workflow
+
+AGENT TIP:
+This tool helps you discover optimal workflows and avoid unnecessary tool calls`,
+          inputSchema: {
+            type: "object",
+            properties: {},
+            required: []
           }
         }
       ]
@@ -523,9 +868,9 @@ export async function createServer() {
         // Best launchers
         await searchMoves(character, { minCounterHit: 20, limit: 5 }),
         // Fast pokes
-        await searchMoves(character, { maxStartup: 12, minBlock: -10, limit: 5 }),
+        await searchMoves(character, { maxStartup: 12, minBlock: -9, limit: 5 }),
         // Safe moves
-        await searchMoves(character, { minBlock: -10, limit: 5 }),
+        await searchMoves(character, { minBlock: -9, limit: 5 }),
         // Heat engagers
         await searchMoves(character, { hasTag: "he", limit: 5 }),
       ];
@@ -549,7 +894,7 @@ export async function createServer() {
       }
 
       if (keyMoves[2].length > 0) {
-        resultText += `🛡️ Safe Moves (-10 or better):\n`;
+        resultText += `🛡️ Safe Moves (-9 or better on block):\n`;
         keyMoves[2].forEach(move => {
           resultText += `  • ${move.command} - ${move.name || 'Unnamed'} (${move.block} ob)\n`;
         });
@@ -647,6 +992,262 @@ export async function createServer() {
           {
             type: "text",
             text: resultText
+          }
+        ]
+      };
+    }
+
+    if (name === "getCapabilities") {
+      const capabilities = {
+        server: {
+          name: "Tekken 8 MCP Server",
+          version: "0.1.0",
+          purpose: "Provide frame data, character information, and strategic analysis for Tekken 8"
+        },
+        dataSources: {
+          frameData: {
+            source: "TekkenDocs API",
+            url: "https://tekkendocs.com",
+            coverage: "All Tekken 8 characters (33 characters)",
+            updateFrequency: "Real-time",
+            reliability: "High - Official frame data",
+            caching: "10 minutes TTL"
+          },
+          characterInfo: {
+            source: "Wavu Wiki",
+            url: "https://wavu.wiki",
+            coverage: "Most Tekken 8 characters",
+            updateFrequency: "Community-maintained (may lag patches)",
+            reliability: "Medium-High - Community-driven",
+            limitations: ["May be outdated after patches", "Completeness varies by character"],
+            caching: "10 minutes TTL"
+          }
+        },
+        capabilities: {
+          frameData: {
+            description: "Search and analyze move frame data",
+            tools: ["searchMoves", "getMove", "getKeyMoves"],
+            coverage: "All character moves with startup, block, hit, counter-hit, damage, tags",
+            useFor: ["Finding safe moves", "Identifying launchers", "Discovering punishers", "Analyzing move properties"],
+            confidence: 1.0
+          },
+          characterAnalysis: {
+            description: "Character overviews, strengths, weaknesses, playstyles",
+            tools: ["getCharacterOverview", "listCharacters"],
+            coverage: "All Tekken 8 characters",
+            useFor: ["Learning new characters", "Understanding archetypes", "Comparing playstyles"],
+            confidence: 0.8,
+            limitations: ["Community-maintained data", "May lag behind patches"]
+          },
+          training: {
+            description: "Structured training programs and practice drills",
+            tools: ["getTrainingDrills"],
+            coverage: "All characters with 7 focus areas",
+            useFor: ["Building practice routines", "Improving specific skills", "Character-specific drills"],
+            confidence: 0.7,
+            limitations: ["Generic drills (not personalized)", "Based on frame data + common strategies"]
+          },
+          metaCognition: {
+            description: "Understanding server capabilities and workflows",
+            tools: ["getCapabilities"],
+            useFor: ["Planning multi-step tasks", "Discovering optimal workflows", "Understanding limitations"],
+            confidence: 1.0
+          }
+        },
+        commonWorkflows: [
+          {
+            goal: "Learn a new character from scratch",
+            description: "Complete beginner's journey to understanding and practicing a character",
+            estimatedTime: "5-10 minutes",
+            steps: [
+              {
+                step: 1,
+                tool: "getCharacterOverview",
+                params: { character: "<character_name>" },
+                purpose: "Understand playstyle, archetype, strengths, weaknesses, difficulty",
+                expectedOutput: "Bio, playstyle, strengths list, weaknesses list, key techniques"
+              },
+              {
+                step: 2,
+                tool: "getKeyMoves",
+                params: { character: "<character_name>" },
+                purpose: "Identify most important moves: launchers, pokes, safe moves, heat engagers",
+                expectedOutput: "Curated list of 10-20 essential moves with frame data"
+              },
+              {
+                step: 3,
+                tool: "searchMoves",
+                params: { character: "<character_name>", maxStartup: 12, minBlock: -9 },
+                purpose: "Find additional fast, safe pokes for neutral game",
+                expectedOutput: "List of i12 or faster safe moves"
+              },
+              {
+                step: 4,
+                tool: "getTrainingDrills",
+                params: { character: "<character_name>", focus: "fundamentals" },
+                purpose: "Get structured practice routine for fundamental skills",
+                expectedOutput: "Training program with drills, objectives, steps, tips"
+              }
+            ],
+            alternativeApproaches: [
+              "Skip step 3 if getKeyMoves provides enough moves",
+              "Use focus: 'all' in step 4 for comprehensive training"
+            ]
+          },
+          {
+            goal: "Prepare for a specific matchup",
+            description: "Learn how to fight against a specific character",
+            estimatedTime: "3-5 minutes",
+            steps: [
+              {
+                step: 1,
+                tool: "getCharacterOverview",
+                params: { character: "<opponent_character>" },
+                purpose: "Understand opponent's gameplan, strengths, and weaknesses",
+                expectedOutput: "Opponent's playstyle, what they're good at, vulnerabilities"
+              },
+              {
+                step: 2,
+                tool: "searchMoves",
+                params: { character: "<opponent_character>", maxBlock: -12 },
+                purpose: "Find punishable moves (launch punishable or worse)",
+                expectedOutput: "List of unsafe moves to watch for and punish"
+              },
+              {
+                step: 3,
+                tool: "getKeyMoves",
+                params: { character: "<opponent_character>" },
+                purpose: "Know their best tools so you can respect/counter them",
+                expectedOutput: "Their strongest launchers, pokes, heat engagers"
+              }
+            ]
+          },
+          {
+            goal: "Optimize punishment game",
+            description: "Learn optimal punishers for every situation",
+            estimatedTime: "5 minutes",
+            steps: [
+              {
+                step: 1,
+                tool: "searchMoves",
+                params: { character: "<your_character>", maxStartup: 10 },
+                purpose: "Find i10 punisher (for -10 to -11 moves)",
+                expectedOutput: "Fastest standing punisher"
+              },
+              {
+                step: 2,
+                tool: "searchMoves",
+                params: { character: "<your_character>", maxStartup: 12 },
+                purpose: "Find i12 punisher (for -12 to -13 moves)",
+                expectedOutput: "i12 punisher (usually better damage than i10)"
+              },
+              {
+                step: 3,
+                tool: "searchMoves",
+                params: { character: "<your_character>", maxStartup: 15, minCounterHit: 20 },
+                purpose: "Find launchers for -14/-15 and worse",
+                expectedOutput: "Launch punishers for big damage"
+              },
+              {
+                step: 4,
+                tool: "getTrainingDrills",
+                params: { character: "<your_character>", focus: "punishment" },
+                purpose: "Practice execution until automatic",
+                expectedOutput: "Punishment drills with frame scenarios"
+              }
+            ]
+          },
+          {
+            goal: "Find character's best pressure tools",
+            description: "Discover moves for maintaining offensive pressure",
+            estimatedTime: "2-3 minutes",
+            steps: [
+              {
+                step: 1,
+                tool: "searchMoves",
+                params: { character: "<character_name>", minBlock: 0 },
+                purpose: "Find plus-on-block moves (your turn after block)",
+                expectedOutput: "Moves that give frame advantage on block"
+              },
+              {
+                step: 2,
+                tool: "searchMoves",
+                params: { character: "<character_name>", minHit: 5, maxStartup: 15 },
+                purpose: "Find moves with high hit advantage for frame traps",
+                expectedOutput: "Moves that give +5 or more on hit"
+              },
+              {
+                step: 3,
+                tool: "getTrainingDrills",
+                params: { character: "<character_name>", focus: "pressure" },
+                purpose: "Learn to chain pressure tools effectively",
+                expectedOutput: "Frame trap drills and pressure sequences"
+              }
+            ]
+          }
+        ],
+        bestPractices: {
+          forAgents: [
+            "Always start with getCharacterOverview() when user asks about a character",
+            "Chain tools logically: Overview → Key Moves → Training Drills",
+            "Use searchMoves() for specific criteria, getKeyMoves() for curated essentials",
+            "Handle CHARACTER_NOT_FOUND errors by parsing JSON and suggesting similar names",
+            "Set user expectations about data sources (frame data = reliable, wiki = community)",
+            "Suggest next steps after each tool call to guide the conversation",
+            "For typos, check error.didYouMean field and auto-correct if similarity > 0.6"
+          ],
+          forUsers: [
+            "Start with getCharacterOverview() for new characters",
+            "Use getKeyMoves() for a quick essential movelist",
+            "Use searchMoves() with filters for specific needs",
+            "Practice with getTrainingDrills() focus areas (start with 'fundamentals')",
+            "Character names are case-insensitive and use hyphens (e.g., 'devil-jin', 'jack-8')"
+          ],
+          workflowPatterns: [
+            "Learning: Overview → Key Moves → Drills",
+            "Matchup prep: Opponent Overview → Their unsafe moves → Their best tools",
+            "Skill improvement: Identify weakness → Search relevant moves → Get drills",
+            "Quick reference: Key Moves (curated) vs. Search Moves (custom filters)"
+          ]
+        },
+        limitations: [
+          "Training drills are generic, not personalized to player skill level",
+          "No real-time matchup analysis (uses general frame data)",
+          "Wavu Wiki data may be outdated after patches",
+          "No video demonstrations or visual examples",
+          "No combo route suggestions (only frame data provided)",
+          "No player-specific statistics or ranked data",
+          "Character overview quality varies by community contributions"
+        ],
+        errorHandling: {
+          CHARACTER_NOT_FOUND: {
+            format: "JSON string with error, suggestions, didYouMean",
+            recovery: "Parse error JSON, check didYouMean field, auto-correct if similarity > 0.6",
+            example: "Input 'lew' → suggests 'law' (90% match) → auto-retry with 'law'"
+          },
+          MOVE_NOT_FOUND: {
+            recovery: "Suggest using searchMoves() instead of exact command lookup"
+          },
+          NETWORK_ERROR: {
+            recovery: "Retry once, then inform user data source is temporarily unavailable"
+          }
+        },
+        futureFeatures: [
+          "Character comparison tool (compareCharacters)",
+          "Matchup analysis with advantage ratings (analyzeMatchup)",
+          "Gameplan suggestions (suggestGameplan)",
+          "Dynamic personalized training progression",
+          "Meta tier lists and tournament statistics",
+          "Patch note tracking and analysis",
+          "Combo route optimization"
+        ]
+      };
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(capabilities, null, 2)
           }
         ]
       };

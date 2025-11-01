@@ -40,41 +40,134 @@ async function fetchJson<T>(url: string): Promise<T> {
 
 // Tekken 8 character roster - update this list when new characters are added
 const TEKKEN8_CHARACTERS = [
-  "law",
-  "jin",
-  "lars",
-  "paul",
-  "kazuya",
-  "king",
-  "yoshimitsu",
-  "nina",
-  "dragunov",
-  "feng",
-  "hwoarang",
-  "jack-8",
-  "jun",
-  "kuma",
-  "lee",
-  "leo",
-  "lili",
-  "steve",
-  "xiaoyu",
+  "alisa",
+  "anna",
+  "asuka",
+  "armor-king",
+  "azucena",
   "bryan",
   "claudio",
+  "clive",
   "devil-jin",
-  "asuka",
+  "dragunov",
+  "eddy",
+  "fahkumram",
+  "feng",
+  "heihachi",
+  "hwoarang",
+  "jack-8",
+  "jin",
+  "jun",
+  "kazuya",
+  "king",
+  "kuma",
+  "lars",
+  "law",
+  "lee",
+  "leo",
   "leroy",
-  "alisa",
-  "zafina",
-  "shaheen",
+  "lidia",
+  "lili",
+  "nina",
+  "panda",
+  "paul",
   "raven",
-  "azucena",
-  "victor",
   "reina",
-  "anna",
-  "fahkumram"
+  "shaheen",
+  "steve",
+  "victor",
+  "xiaoyu",
+  "yoshimitsu",
+  "zafina",
   // Add DLC characters here as they're released
 ] as const;
+
+// Error types for better error handling
+export interface TekkenError {
+  error: string;
+  code: "CHARACTER_NOT_FOUND" | "MOVE_NOT_FOUND" | "NETWORK_ERROR" | "INVALID_INPUT";
+  input: any;
+  suggestions?: Array<{ name: string; similarity: number }>;
+  didYouMean?: string;
+  action?: string;
+  alternatives?: string[];
+}
+
+/**
+ * Calculate Levenshtein distance between two strings for fuzzy matching
+ */
+function levenshteinDistance(str1: string, str2: string): number {
+  const matrix: number[][] = [];
+
+  for (let i = 0; i <= str2.length; i++) {
+    matrix[i] = [i];
+  }
+
+  for (let j = 0; j <= str1.length; j++) {
+    matrix[0][j] = j;
+  }
+
+  for (let i = 1; i <= str2.length; i++) {
+    for (let j = 1; j <= str1.length; j++) {
+      if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j] + 1
+        );
+      }
+    }
+  }
+
+  return matrix[str2.length][str1.length];
+}
+
+/**
+ * Calculate similarity score between two strings (0-1)
+ */
+function calculateSimilarity(str1: string, str2: string): number {
+  const distance = levenshteinDistance(str1.toLowerCase(), str2.toLowerCase());
+  const maxLen = Math.max(str1.length, str2.length);
+  return 1 - distance / maxLen;
+}
+
+/**
+ * Find similar character names for fuzzy matching
+ */
+export function findSimilarCharacters(input: string, limit: number = 3): Array<{ name: string; similarity: number }> {
+  return TEKKEN8_CHARACTERS
+    .map(char => ({
+      name: char,
+      similarity: calculateSimilarity(input, char)
+    }))
+    .sort((a, b) => b.similarity - a.similarity)
+    .slice(0, limit);
+}
+
+/**
+ * Create a helpful error message when character is not found
+ */
+export function createCharacterNotFoundError(input: string): TekkenError {
+  const suggestions = findSimilarCharacters(input);
+  const bestMatch = suggestions[0];
+
+  return {
+    error: `Character "${input}" not found`,
+    code: "CHARACTER_NOT_FOUND",
+    input,
+    suggestions,
+    didYouMean: bestMatch.similarity > 0.6 ? bestMatch.name : undefined,
+    action: bestMatch.similarity > 0.6
+      ? `Did you mean "${bestMatch.name}"? The server can auto-correct this for you.`
+      : `Please use listCharacters() to see all available characters.`,
+    alternatives: [
+      "Use listCharacters() to see all available characters",
+      `Similar names: ${suggestions.map(s => `${s.name} (${Math.round(s.similarity * 100)}% match)`).join(", ")}`
+    ]
+  };
+}
 
 export async function listCharacters(): Promise<string[]> {
   return [...TEKKEN8_CHARACTERS];
@@ -200,8 +293,8 @@ export async function getMovelist(char: string): Promise<TekkenMove[]> {
 
   // Check if character is in our known list
   if (!isValidCharacter(lowerChar)) {
-    const available = TEKKEN8_CHARACTERS.join(", ");
-    throw new Error(`Unknown character: ${char}. Available characters: ${available}`);
+    const error = createCharacterNotFoundError(lowerChar);
+    throw new Error(JSON.stringify(error, null, 2));
   }
 
   const url = `https://tekkendocs.com/api/t8/${lowerChar}/framedata`;
@@ -268,8 +361,8 @@ export async function searchMoves(
   characterSchema.parse(lowerChar);
 
   if (!isValidCharacter(lowerChar)) {
-    const available = TEKKEN8_CHARACTERS.join(", ");
-    throw new Error(`Unknown character: ${character}. Available characters: ${available}`);
+    const error = createCharacterNotFoundError(lowerChar);
+    throw new Error(JSON.stringify(error, null, 2));
   }
 
   const moves = await getMovelist(lowerChar);
@@ -435,8 +528,8 @@ export async function getCharacterOverview(character: string): Promise<Character
   characterSchema.parse(lowerChar);
 
   if (!isValidCharacter(lowerChar)) {
-    const available = TEKKEN8_CHARACTERS.join(", ");
-    throw new Error(`Unknown character: ${character}. Available characters: ${available}`);
+    const error = createCharacterNotFoundError(lowerChar);
+    throw new Error(JSON.stringify(error, null, 2));
   }
 
   const cacheKey = `overview_${lowerChar}`;
@@ -914,8 +1007,8 @@ export async function getTrainingDrills(
   characterSchema.parse(lowerChar);
 
   if (!isValidCharacter(lowerChar)) {
-    const available = TEKKEN8_CHARACTERS.join(", ");
-    throw new Error(`Unknown character: ${character}. Available characters: ${available}`);
+    const error = createCharacterNotFoundError(lowerChar);
+    throw new Error(JSON.stringify(error, null, 2));
   }
 
   const normalizedFocus = focus || 'all';
