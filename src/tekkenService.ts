@@ -1466,3 +1466,283 @@ function generateProgramDescription(character: string, focus: string, overview: 
   return `Focused ${focus} training for ${character}, tailored for ${archetype} gameplay style.`;
 }
 
+/**
+ * Character comparison data structure
+ */
+export interface CharacterComparison {
+  characters: [string, string];
+  comparison: {
+    speed: {
+      winner: string;
+      difference: string;
+      details: {
+        char1FastestMove: number;
+        char2FastestMove: number;
+        char1AvgStartup: number;
+        char2AvgStartup: number;
+      };
+    };
+    safety: {
+      winner: string;
+      difference: string;
+      details: {
+        char1SafeMoveCount: number;
+        char2SafeMoveCount: number;
+        char1AvgBlock: number;
+        char2AvgBlock: number;
+      };
+    };
+    damage: {
+      winner: string;
+      difference: string;
+      details: {
+        char1AvgDamage: number;
+        char2AvgDamage: number;
+        char1MaxDamage: number;
+        char2MaxDamage: number;
+      };
+    };
+    playstyle: {
+      similarity: number; // 0-1
+      char1Archetype: string;
+      char2Archetype: string;
+      differences: string[];
+    };
+  };
+  recommendations: {
+    whyChooseChar1: string[];
+    whyChooseChar2: string[];
+    similarityScore: number;
+    transitionDifficulty: "easy" | "medium" | "hard";
+  };
+}
+
+/**
+ * Compare two characters across multiple dimensions
+ */
+export async function compareCharacters(
+  char1: string,
+  char2: string
+): Promise<CharacterComparison> {
+  const [moves1, moves2, overview1, overview2] = await Promise.all([
+    getMovelist(char1),
+    getMovelist(char2),
+    getCharacterOverview(char1),
+    getCharacterOverview(char2)
+  ]);
+
+  // Calculate speed comparison
+  const char1Speeds = moves1
+    .map(m => parseFrameData(m.startup))
+    .filter(s => s !== null) as number[];
+  const char2Speeds = moves2
+    .map(m => parseFrameData(m.startup))
+    .filter(s => s !== null) as number[];
+
+  const char1AvgSpeed = char1Speeds.length > 0
+    ? char1Speeds.reduce((a, b) => a + b, 0) / char1Speeds.length
+    : 0;
+  const char2AvgSpeed = char2Speeds.length > 0
+    ? char2Speeds.reduce((a, b) => a + b, 0) / char2Speeds.length
+    : 0;
+  const char1Fastest = char1Speeds.length > 0 ? Math.min(...char1Speeds) : 0;
+  const char2Fastest = char2Speeds.length > 0 ? Math.min(...char2Speeds) : 0;
+
+  // Calculate safety comparison
+  const char1Safe = moves1.filter(m => {
+    const block = parseFrameData(m.block);
+    return block !== null && block >= -9;
+  }).length;
+  const char2Safe = moves2.filter(m => {
+    const block = parseFrameData(m.block);
+    return block !== null && block >= -9;
+  }).length;
+
+  const char1Blocks = moves1
+    .map(m => parseFrameData(m.block))
+    .filter(b => b !== null) as number[];
+  const char2Blocks = moves2
+    .map(m => parseFrameData(m.block))
+    .filter(b => b !== null) as number[];
+
+  const char1AvgBlock = char1Blocks.length > 0
+    ? char1Blocks.reduce((a, b) => a + b, 0) / char1Blocks.length
+    : 0;
+  const char2AvgBlock = char2Blocks.length > 0
+    ? char2Blocks.reduce((a, b) => a + b, 0) / char2Blocks.length
+    : 0;
+
+  // Calculate damage comparison
+  const char1Damages = moves1.map(m => parseInt(m.damage.match(/\d+/)?.[0] || "0"));
+  const char2Damages = moves2.map(m => parseInt(m.damage.match(/\d+/)?.[0] || "0"));
+  const char1AvgDamage = char1Damages.length > 0
+    ? char1Damages.reduce((a, b) => a + b, 0) / char1Damages.length
+    : 0;
+  const char2AvgDamage = char2Damages.length > 0
+    ? char2Damages.reduce((a, b) => a + b, 0) / char2Damages.length
+    : 0;
+
+  // Playstyle similarity
+  const playstyleSimilarity = calculatePlaystyleSimilarity(overview1, overview2);
+
+  return {
+    characters: [char1, char2],
+    comparison: {
+      speed: {
+        winner: char1AvgSpeed < char2AvgSpeed ? char1 : char2,
+        difference: `${Math.abs(char1AvgSpeed - char2AvgSpeed).toFixed(1)}f average difference`,
+        details: {
+          char1FastestMove: char1Fastest,
+          char2FastestMove: char2Fastest,
+          char1AvgStartup: char1AvgSpeed,
+          char2AvgStartup: char2AvgSpeed
+        }
+      },
+      safety: {
+        winner: char1Safe > char2Safe ? char1 : char2,
+        difference: `${Math.abs(char1Safe - char2Safe)} more safe moves`,
+        details: {
+          char1SafeMoveCount: char1Safe,
+          char2SafeMoveCount: char2Safe,
+          char1AvgBlock: char1AvgBlock,
+          char2AvgBlock: char2AvgBlock
+        }
+      },
+      damage: {
+        winner: char1AvgDamage > char2AvgDamage ? char1 : char2,
+        difference: `${Math.abs(char1AvgDamage - char2AvgDamage).toFixed(1)} average damage difference`,
+        details: {
+          char1AvgDamage,
+          char2AvgDamage,
+          char1MaxDamage: char1Damages.length > 0 ? Math.max(...char1Damages) : 0,
+          char2MaxDamage: char2Damages.length > 0 ? Math.max(...char2Damages) : 0
+        }
+      },
+      playstyle: {
+        similarity: playstyleSimilarity,
+        char1Archetype: overview1.archetype || overview1.playstyle || "unknown",
+        char2Archetype: overview2.archetype || overview2.playstyle || "unknown",
+        differences: identifyPlaystyleDifferences(overview1, overview2)
+      }
+    },
+    recommendations: {
+      whyChooseChar1: generateReasons(char1, overview1, moves1),
+      whyChooseChar2: generateReasons(char2, overview2, moves2),
+      similarityScore: playstyleSimilarity,
+      transitionDifficulty: playstyleSimilarity > 0.7 ? "easy" : playstyleSimilarity > 0.4 ? "medium" : "hard"
+    }
+  };
+}
+
+function calculatePlaystyleSimilarity(
+  overview1: CharacterOverview,
+  overview2: CharacterOverview
+): number {
+  let similarity = 0;
+
+  // Compare archetypes
+  if (overview1.archetype && overview2.archetype) {
+    const arch1 = overview1.archetype.toLowerCase();
+    const arch2 = overview2.archetype.toLowerCase();
+    if (arch1.includes(arch2) || arch2.includes(arch1)) {
+      similarity += 0.3;
+    }
+  }
+
+  // Compare difficulty
+  if (overview1.difficulty === overview2.difficulty) {
+    similarity += 0.2;
+  }
+
+  // Compare key techniques (overlap)
+  if (overview1.keyTechniques && overview2.keyTechniques) {
+    const overlap = overview1.keyTechniques.filter(t =>
+      overview2.keyTechniques?.some(t2 =>
+        t.toLowerCase().includes(t2.toLowerCase()) ||
+        t2.toLowerCase().includes(t.toLowerCase())
+      )
+    ).length;
+    similarity += (overlap / Math.max(overview1.keyTechniques.length, overview2.keyTechniques.length)) * 0.3;
+  }
+
+  // Compare strengths/weaknesses overlap
+  if (overview1.strengths && overview2.strengths) {
+    const strengthOverlap = overview1.strengths.filter(s =>
+      overview2.strengths?.some(s2 =>
+        s.toLowerCase().includes(s2.toLowerCase()) ||
+        s2.toLowerCase().includes(s.toLowerCase())
+      )
+    ).length;
+    similarity += (strengthOverlap / Math.max(overview1.strengths.length, overview2.strengths.length)) * 0.2;
+  }
+
+  return Math.min(similarity, 1.0);
+}
+
+function identifyPlaystyleDifferences(
+  overview1: CharacterOverview,
+  overview2: CharacterOverview
+): string[] {
+  const differences: string[] = [];
+
+  if (overview1.archetype !== overview2.archetype) {
+    differences.push(`${overview1.name} is ${overview1.archetype || overview1.playstyle || 'unknown'}, ${overview2.name} is ${overview2.archetype || overview2.playstyle || 'unknown'}`);
+  }
+
+  if (overview1.difficulty !== overview2.difficulty) {
+    differences.push(`${overview1.name} is ${overview1.difficulty} difficulty, ${overview2.name} is ${overview2.difficulty}`);
+  }
+
+  // Compare unique strengths
+  const uniqueStrengths1 = overview1.strengths?.filter(s =>
+    !overview2.strengths?.some(s2 =>
+      s.toLowerCase().includes(s2.toLowerCase()) ||
+      s2.toLowerCase().includes(s.toLowerCase())
+    )
+  );
+  if (uniqueStrengths1 && uniqueStrengths1.length > 0) {
+    differences.push(`${overview1.name} unique strengths: ${uniqueStrengths1[0]}`);
+  }
+
+  const uniqueStrengths2 = overview2.strengths?.filter(s =>
+    !overview1.strengths?.some(s2 =>
+      s.toLowerCase().includes(s2.toLowerCase()) ||
+      s2.toLowerCase().includes(s.toLowerCase())
+    )
+  );
+  if (uniqueStrengths2 && uniqueStrengths2.length > 0) {
+    differences.push(`${overview2.name} unique strengths: ${uniqueStrengths2[0]}`);
+  }
+
+  return differences;
+}
+
+function generateReasons(
+  character: string,
+  overview: CharacterOverview,
+  moves: TekkenMove[]
+): string[] {
+  const reasons: string[] = [];
+
+  if (overview.difficulty === 'Beginner') {
+    reasons.push("Easier execution requirements");
+  } else if (overview.difficulty === 'Advanced') {
+    reasons.push("High skill ceiling for optimization");
+  }
+
+  if (overview.strengths) {
+    reasons.push(...overview.strengths.slice(0, 2));
+  }
+
+  // Add frame data reasons
+  const safeMoves = moves.filter(m => {
+    const block = parseFrameData(m.block);
+    return block !== null && block >= -9;
+  });
+  if (safeMoves.length > moves.length * 0.4) {
+    reasons.push("High proportion of safe moves");
+  }
+
+  return reasons.slice(0, 4);
+}
+

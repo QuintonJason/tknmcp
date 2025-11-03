@@ -13,10 +13,12 @@ import {
   searchMoves,
   getCharacterOverview,
   getTrainingDrills,
+  compareCharacters,
   type TekkenMove,
   type SearchMovesFilters,
   type CharacterOverview,
-  type TrainingProgram
+  type TrainingProgram,
+  type CharacterComparison
 } from "./tekkenService.js";
 
 // Helper function to format moves in a nice table format
@@ -208,6 +210,255 @@ function shouldUseTableFormat(character: string, filters: any, context?: string)
   const hasCategorialFilter = categoryRequests.some(category => filterValues.includes(category));
 
   return hasMinimalFilters || hasCategorialFilter;
+}
+
+// Structured output helper functions
+interface SafetyAnalysis {
+  category: "plus" | "very_safe" | "safe" | "jab_punishable" | "launch_punishable" | "very_unsafe" | "unknown";
+  numeric: number | null;
+  explanation: string;
+}
+
+interface SpeedAnalysis {
+  category: "very_fast" | "fast" | "medium" | "slow" | "very_slow" | "unknown";
+  numeric: number | null;
+  usage: string[];
+}
+
+interface MoveAnalysis {
+  move: {
+    command: string;
+    name?: string;
+    frameData: {
+      startup?: string;
+      block?: string;
+      hit?: string;
+      counterHit?: string;
+    };
+    properties: {
+      hitLevel: string;
+      damage: string;
+      tags?: Record<string, string>;
+      notes?: string;
+    };
+  };
+  analysis: {
+    safety: SafetyAnalysis;
+    speed: SpeedAnalysis;
+    reward: string;
+    usage: string[];
+    strategicImportance?: number;
+    whyImportant?: string;
+    bestFor?: string[];
+  };
+}
+
+function analyzeSafety(move: TekkenMove): SafetyAnalysis {
+  const block = parseFrameData(move.block);
+
+  if (block === null) {
+    return {
+      category: "unknown",
+      numeric: null,
+      explanation: "Block advantage not available"
+    };
+  }
+
+  if (block > 0) {
+    return {
+      category: "plus",
+      numeric: block,
+      explanation: `Plus on block (+${block}), your turn continues`
+    };
+  } else if (block >= -4) {
+    return {
+      category: "very_safe",
+      numeric: block,
+      explanation: "Very safe, cannot be punished by most attacks"
+    };
+  } else if (block >= -9) {
+    return {
+      category: "safe",
+      numeric: block,
+      explanation: "Safe, cannot be punished by standing jabs"
+    };
+  } else if (block >= -12) {
+    return {
+      category: "jab_punishable",
+      numeric: block,
+      explanation: "Jab punishable, opponent can counter with fast attacks"
+    };
+  } else if (block >= -15) {
+    return {
+      category: "launch_punishable",
+      numeric: block,
+      explanation: "Launch punishable, opponent can use launchers"
+    };
+  } else {
+    return {
+      category: "very_unsafe",
+      numeric: block,
+      explanation: "Very unsafe, easily punishable"
+    };
+  }
+}
+
+function analyzeSpeed(move: TekkenMove): SpeedAnalysis {
+  const startup = parseFrameData(move.startup);
+
+  if (startup === null) {
+    return {
+      category: "unknown",
+      numeric: null,
+      usage: []
+    };
+  }
+
+  let category: SpeedAnalysis["category"];
+  let usage: string[];
+
+  if (startup <= 10) {
+    category = "very_fast";
+    usage = ["punisher", "jab", "poke"];
+  } else if (startup <= 13) {
+    category = "fast";
+    usage = ["poke", "pressure", "punisher"];
+  } else if (startup <= 16) {
+    category = "medium";
+    usage = ["pressure", "launcher", "poke"];
+  } else if (startup <= 20) {
+    category = "slow";
+    usage = ["launcher", "whiff_punisher"];
+  } else {
+    category = "very_slow";
+    usage = ["whiff_punisher"];
+  }
+
+  return { category, numeric: startup, usage };
+}
+
+function analyzeReward(move: TekkenMove): string {
+  if (isLauncher(move.hit) || isLauncher(move.counterHit)) {
+    return "launcher";
+  }
+
+  const hit = parseFrameData(move.hit);
+  if (hit !== null) {
+    if (hit >= 20) return "launcher";
+    if (hit >= 15) return "high_advantage";
+    if (hit >= 10) return "medium_advantage";
+    if (hit >= 5) return "good_advantage";
+    if (hit > 0) return "plus_frames";
+  }
+
+  return "low_reward";
+}
+
+function suggestUsage(move: TekkenMove): string[] {
+  const usage: string[] = [];
+  const block = parseFrameData(move.block);
+  const startup = parseFrameData(move.startup);
+  const hit = parseFrameData(move.hit);
+
+  // Safety + speed combinations
+  if (block !== null && block >= -9 && startup !== null && startup <= 13) {
+    usage.push("neutral_poke");
+  }
+
+  if (isLauncher(move.counterHit)) {
+    usage.push("whiff_punisher");
+  }
+
+  if (startup !== null && startup <= 10) {
+    usage.push("punisher");
+  }
+
+  if (move.tags?.he || move.notes?.toLowerCase().includes("heat engager")) {
+    usage.push("heat_engager");
+  }
+
+  if (block !== null && block > 0) {
+    usage.push("pressure_tool");
+  }
+
+  if (move.hitLevel.includes("l")) {
+    usage.push("mixup_tool");
+  }
+
+  if (move.hitLevel.includes("h") && startup !== null && startup <= 10) {
+    usage.push("high_crush_check");
+  }
+
+  if (usage.length === 0) {
+    usage.push("general_attack");
+  }
+
+  return [...new Set(usage)]; // Remove duplicates
+}
+
+function createMoveAnalysis(move: TekkenMove): MoveAnalysis {
+  const safety = analyzeSafety(move);
+  const speed = analyzeSpeed(move);
+  const reward = analyzeReward(move);
+  const usage = suggestUsage(move);
+
+  // Determine why it's important
+  let whyImportant: string | undefined;
+  if (move.strategicImportance && move.strategicImportance >= 80) {
+    if (safety.category === "very_safe" && speed.category === "fast") {
+      whyImportant = "Fast, safe mid poke - essential neutral tool";
+    } else if (move.tags?.he) {
+      whyImportant = "Heat engager - crucial for heat activation";
+    } else if (isLauncher(move.counterHit)) {
+      whyImportant = "Counter-hit launcher - devastating punisher";
+    } else if (safety.category === "plus") {
+      whyImportant = "Plus on block - powerful pressure tool";
+    }
+  }
+
+  // Best for scenarios
+  const bestFor: string[] = [];
+  if (safety.category === "safe" || safety.category === "very_safe") {
+    bestFor.push("Neutral game");
+  }
+  if (safety.category === "plus") {
+    bestFor.push("Pressure");
+    bestFor.push("Frame traps");
+  }
+  if (isLauncher(move.counterHit)) {
+    bestFor.push("Whiff punishment");
+  }
+  if (speed.category === "very_fast" || speed.category === "fast") {
+    bestFor.push("Pokes");
+  }
+
+  return {
+    move: {
+      command: move.command,
+      name: move.name,
+      frameData: {
+        startup: move.startup,
+        block: move.block,
+        hit: move.hit,
+        counterHit: move.counterHit
+      },
+      properties: {
+        hitLevel: move.hitLevel,
+        damage: move.damage,
+        tags: move.tags,
+        notes: move.notes
+      }
+    },
+    analysis: {
+      safety,
+      speed,
+      reward,
+      usage,
+      strategicImportance: move.strategicImportance,
+      whyImportant,
+      bestFor: bestFor.length > 0 ? bestFor : undefined
+    }
+  };
 }
 
 export async function createServer() {
@@ -467,6 +718,16 @@ EXAMPLE: hasTag: "he" finds all heat engagers`
               limit: {
                 type: "number",
                 description: "Limit number of results (useful for 'top 5' queries). Default: return all matching moves"
+              },
+              format: {
+                type: "string",
+                enum: ["structured", "formatted", "both"],
+                description: `Output format (default: "formatted"):
+• "structured" = Machine-readable JSON with analysis, metadata, recommendations
+• "formatted" = Human-readable text/table format
+• "both" = Returns both structured and formatted
+
+💡 TIP: Agents should use "structured" for programmatic reasoning`
               }
             },
             required: ["character"]
@@ -666,6 +927,60 @@ Default: "all" if not specified`
           }
         },
         {
+          name: "compareCharacters",
+          description: `Compare two characters across multiple dimensions (speed, safety, damage, playstyle).
+
+🎯 WHEN TO USE:
+• Deciding which character to learn
+• User asks "should I play Law or Jin?"
+• Understanding character matchups
+• Identifying playstyle differences
+• Evaluating transition difficulty between characters
+
+📊 COMPARES:
+• Speed (startup frames, fastest moves, average speed)
+• Safety (safe move count, average block advantage)
+• Damage (average damage, max damage)
+• Playstyle (archetype similarity, difficulty, key techniques)
+
+🔗 COMBINE WITH:
+• Use after getCharacterOverview() for both characters to understand context
+• Can follow with getKeyMoves() for character-specific move comparisons
+• Use to answer "which character?" questions with data
+
+💡 EXAMPLES:
+Q: "Should I learn Law or Jin?"
+A: compareCharacters("law", "jin") → Quantitative comparison
+
+Q: "How similar are King and Armor King?"
+A: compareCharacters("king", "armor-king") → Playstyle similarity score
+
+Q: "Which is faster, Kazuya or Jin?"
+A: compareCharacters("kazuya", "jin") → Speed comparison details
+
+📋 RETURNS:
+Complete comparison with:
+• Winner for each category (speed, safety, damage)
+• Detailed metrics and differences
+• Playstyle similarity score (0-1)
+• Recommendations for each character
+• Transition difficulty rating`,
+          inputSchema: {
+            type: "object",
+            properties: {
+              character1: {
+                type: "string",
+                description: "First character to compare (e.g., 'law', 'jin')"
+              },
+              character2: {
+                type: "string",
+                description: "Second character to compare (e.g., 'jin', 'kazuya')"
+              }
+            },
+            required: ["character1", "character2"]
+          }
+        },
+        {
           name: "getCapabilities",
           description: `Understand what this Tekken MCP server can do and discover optimal workflows.
 
@@ -749,27 +1064,76 @@ This tool helps you discover optimal workflows and avoid unnecessary tool calls`
     }
 
     if (name === "searchMoves") {
-      const { character, ...filters } = args as any;
+      const { character, format = "formatted", ...filters } = args as any;
       const moves = await searchMoves(character, filters);
 
-      // Check if this should use the nice table format
-      const useTableFormat = shouldUseTableFormat(character, filters);
+      // Build structured output
+      const moveAnalyses = moves.map(move => createMoveAnalysis(move));
 
-      if (useTableFormat && moves.length > 0) {
-        // Use the nice summarized table format
-        const title = `${character.charAt(0).toUpperCase() + character.slice(1)}'s Best Moves`;
-        const tableOutput = formatMovesTable(moves, title);
+      // Calculate summary statistics
+      const startups = moves.map(m => parseFrameData(m.startup)).filter(s => s !== null) as number[];
+      const blocks = moves.map(m => parseFrameData(m.block)).filter(b => b !== null) as number[];
+      const damages = moves.map(m => parseInt(m.damage.match(/\d+/)?.[0] || "0"));
 
-        return {
-          content: [
+      const structured = {
+        metadata: {
+          character,
+          query: filters,
+          timestamp: new Date().toISOString(),
+          resultCount: moves.length,
+          dataSource: "TekkenDocs API",
+          confidence: 1.0,
+          queryType: "filtered_search"
+        },
+        results: moveAnalyses,
+        summary: {
+          fastestMove: moves.length > 0 && startups.length > 0
+            ? { command: moves[startups.indexOf(Math.min(...startups))].command, startup: Math.min(...startups) }
+            : undefined,
+          safestMove: moves.length > 0 && blocks.length > 0
+            ? { command: moves[blocks.indexOf(Math.max(...blocks))].command, block: Math.max(...blocks) }
+            : undefined,
+          highestDamage: moves.length > 0 && damages.length > 0
+            ? { command: moves[damages.indexOf(Math.max(...damages))].command, damage: Math.max(...damages) }
+            : undefined,
+          statistics: {
+            totalResults: moves.length,
+            averageStartup: startups.length > 0 ? startups.reduce((a, b) => a + b, 0) / startups.length : undefined,
+            averageBlock: blocks.length > 0 ? blocks.reduce((a, b) => a + b, 0) / blocks.length : undefined,
+            safeMoveCount: blocks.filter(b => b >= -9).length,
+            plusOnBlockCount: blocks.filter(b => b > 0).length
+          }
+        },
+        recommendations: {
+          nextSteps: [
+            `Use getTrainingDrills('${character}', 'fundamentals') to practice these moves`,
+            `See getKeyMoves('${character}') for curated essential moves`
+          ],
+          relatedQueries: [
             {
-              type: "text",
-              text: tableOutput
+              tool: "getKeyMoves",
+              params: { character },
+              reason: "See expert-curated moves instead of filtered results",
+              priority: "high"
+            },
+            {
+              tool: "getTrainingDrills",
+              params: { character, focus: "fundamentals" },
+              reason: "Practice these moves",
+              priority: "medium"
             }
           ]
-        };
+        }
+      };
+
+      // Build formatted output
+      const useTableFormat = shouldUseTableFormat(character, filters);
+      let formatted: string;
+
+      if (useTableFormat && moves.length > 0) {
+        const title = `${character.charAt(0).toUpperCase() + character.slice(1)}'s Best Moves`;
+        formatted = formatMovesTable(moves, title);
       } else {
-        // Use the detailed format for specific searches
         const summary = `Found ${moves.length} moves for ${character}` +
           (filters.hitLevel ? ` (${filters.hitLevel} attacks)` : '') +
           (filters.maxStartup ? ` (≤${filters.maxStartup}f startup)` : '') +
@@ -783,11 +1147,34 @@ This tool helps you discover optimal workflows and avoid unnecessary tool calls`
           (move.notes ? `  Notes: ${move.notes}\n` : '')
         ).join('\n');
 
+        formatted = `${summary}\n\n${movesList}`;
+      }
+
+      // Return based on format preference
+      if (format === "structured") {
         return {
           content: [
             {
               type: "text",
-              text: `${summary}\n\n${movesList}`
+              text: JSON.stringify(structured, null, 2)
+            }
+          ]
+        };
+      } else if (format === "formatted") {
+        return {
+          content: [
+            {
+              type: "text",
+              text: formatted
+            }
+          ]
+        };
+      } else { // both
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ structured, formatted }, null, 2)
             }
           ]
         };
@@ -992,6 +1379,20 @@ This tool helps you discover optimal workflows and avoid unnecessary tool calls`
           {
             type: "text",
             text: resultText
+          }
+        ]
+      };
+    }
+
+    if (name === "compareCharacters") {
+      const { character1, character2 } = args as { character1: string; character2: string };
+      const comparison = await compareCharacters(character1, character2);
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(comparison, null, 2)
           }
         ]
       };
